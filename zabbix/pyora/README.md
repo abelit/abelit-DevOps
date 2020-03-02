@@ -10,6 +10,9 @@ cx-Oracle==5.1.2
 python-argparse
 
 Note:Try installing python-argparse: `easy_install argparse`  or  `yum install python-argarse` on RHEL/Centos.
+```
+pip install argparse cx-Oracle -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
+```
 
 Tested with python 2.6 and 2.7
 
