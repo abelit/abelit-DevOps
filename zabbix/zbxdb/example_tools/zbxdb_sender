@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+ME=${0##*/}
+NOW=$(date +%Y%m%d-%H%M)
+NOWD=$(date +%a)
+if [ -z "$ZBXDB_OUT" ]
+then
+  . $HOME/.bash_profile
+fi
+
+if [ -z "$ZBXDB_OUT" ]
+then
+  ZBXDB_OUT=$1
+fi
+
+if [ -z "$ZBXDB_OUT" ]
+then
+  echo "$ME specify ZBXDB_OUT in \$HOME/.bash_profile or as first argument of $ME"
+  echo "Usage $ME [ZBXDB_OUT]"
+  echo "   to collect outputs from that directory to send to zabbix"
+  echo "   using \$HOME/$ME directory for work space"
+  echo "   using \$HOME/log for log directory"
+  echo "   PLEASE do not run zbxdb processes as root"
+  exit 1
+fi >&2
+
+if [ ! -d $ZBXDB_OUT ]
+then
+  echo "$ME ZBXDB_OUT directory $ZBXDB_OUT does not exist"
+  exit 1
+fi >&2
+if [ ! -w $ZBXDB_OUT ]
+then
+  echo "$ME ZBXDB_OUT directory $ZBXDB_OUT not writeable"
+  exit 1
+fi >&2
+
+if [ ! -d $HOME/$ME/in ]
+then
+  mkdir -p $HOME/$ME/in
+fi
+if [ ! -d $HOME/$ME/archive ]
+then
+  mkdir -p $HOME/$ME/archive
+fi
+
+if [ -f $ZBXDB_OUT/.$ME.lock ]
+then
+  echo "${NOW} previous run still running" >>$HOME/log/$ME.$NOWD.log
+  exit 2
+fi
+
+touch $ZBXDB_OUT/.$ME.lock
+mv $ZBXDB_OUT/* $HOME/$ME/in
+cd $HOME/$ME/in
+{
+  date
+  cnt=`ls|wc -l`
+  if [ $cnt -gt 0 ]
+  then
+    ls|while read file
+    do
+      cat $file | zabbix_sender -z 127.0.0.1 -T -i - | sed "s/^/$file /"
+    done
+    tar -cf - *|gzip -9 >../archive/zbx_${NOW}.tar.gz
+    rm *
+  fi
+} >>$HOME/log/$ME.$NOWD.log 2>&1
+find ../archive -type f -mtime +2 |xargs rm -f
+find $HOME/log/$ME.*.log -mtime +5|xargs rm 2>/dev/null
+cd -
+rm $ZBXDB_OUT/.$ME.lock

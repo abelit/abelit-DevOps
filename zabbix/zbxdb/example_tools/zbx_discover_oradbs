@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+ME=${0##*/}
+ME_FILE=`type $0|sed "s/[()]//g"|awk '{print $NF}'`
+ME_DIR=`dirname $ME_FILE`
+list_listener()
+{
+	SITE=$1
+	CLUSTER=`echo $2|sed 's/"//g'`
+  shift 2
+	NODES=$*
+	{
+		for node in $NODES
+		do
+			echo node $node >&2
+      echo "scp -p ${ME_FILE}_remote ${node}:/tmp/${ME}_remote_${USER}"
+      scp -p ${ME_FILE}_remote ${node}:/tmp/${ME}_remote_${USER}
+			< /dev/null ssh -tt $node /tmp/${ME}_remote_${USER}  2>/dev/null
+		done
+	} |grep Instance|awk '{print $2}'|cut -f2 -d\"|
+      if [ -n "${CLUSTER}" ]
+      then 
+        sed "s/[0-9]$//"
+      else
+        cat
+      fi |
+      sed "s/[+-]//"|sort|uniq|
+      if [ -n "${CLUSTER}" ]
+      then
+        sed "s/^/${SITE}_${CLUSTER}_/"|sed "s/$/ ${SITE}_${CLUSTER}/"
+      else
+        sed "s/^/${SITE}_/"|sed "s/$/ ${SITE}/"
+      fi
+}
+# main
+if [ $# -lt 1 ]
+then
+  echo "$ME zabbix_hostname [zabbix_server]">&2
+  echo " if zabbix_server specified, data is sent to zabbix_server" >&2
+  echo "    otherwise to stdout"
+  exit 1
+fi
+
+TS=`date +%s`
+zabbix_host=$1
+if [ $# -eq 2 ]
+then
+  zabbix_server=$2
+fi
+ALERTHOSTS=`grep alert_pattern $HOME/etc/$ME.cfg|grep -v " #*"|cut -f2 -d"="`
+ALERT_GROUP=`grep alert_group  $HOME/etc/$ME.cfg|grep -v " #*"|cut -f2 -d"="`
+echo ALERTHOSTS $ALERTHOSTS ALERT_GROUP $ALERT_GROUP
+grep -v " *#" $HOME/etc/$ME.cfg| grep -v "(alert_group|alert_pattern)" |while read group cluster nodes
+do
+  echo nodes $nodes >&2
+  list_listener "$group" "$cluster" "$nodes"| if [ -f $HOME/etc/$ME.ignore ]
+     then
+       grep -vf $HOME/etc/$ME.ignore
+     else
+       cat
+     fi
+   done | awk -v AP="$ALERTHOSTS" -v AG=$ALERT_GROUP '{ if ( match ( $1, AP )) {print $0, AG} else {print $0}}'|
+       awk -v host=$zabbix_host -v ts=$TS 'BEGIN { printf ("%s oradb.lld %s { \"data\":[\n", host, ts); comma=" "  }
+       { if ( NF == 3 ) 
+            {printf ("%s{\"{#DB_NAME}\":\"%s\",\"{#GROUP}\":\"%s\",\"{#ALERT}\":\"%s\"} \n", comma, $1, $2, $3); comma="," }
+        else 
+          {printf ("%s{\"{#DB_NAME}\":\"%s\",\"{#GROUP}\":\"%s\"} \n", comma, $1, $2, $3); comma="," }
+         }
+         END {printf ("]}\n") }' |
+         tee $ME.tmp |
+     tr -d "\n" | if [ -n "$zabbix_server" ]
+   then
+     zabbix_sender  -z $zabbix_server -T -i -
+   else
+     cat
+   fi
